@@ -1,0 +1,78 @@
+---
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - python3-docker
+      - openssl
+    state: present
+    update_cache: true
+
+- name: Create directories for Zabbix stack
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ zabbix_stack_dir }}"
+    - "{{ zabbix_stack_dir }}/ssl"
+    - "{{ zabbix_stack_dir }}/nginx"
+
+- name: Generate self-signed private key
+  ansible.builtin.command:
+    cmd: >
+      openssl genrsa
+      -out {{ zabbix_stack_dir }}/ssl/privkey.pem 2048
+  args:
+    creates: "{{ zabbix_stack_dir }}/ssl/privkey.pem"
+
+- name: Generate self-signed certificate
+  ansible.builtin.command:
+    cmd: >
+      openssl req -x509 -new
+      -key {{ zabbix_stack_dir }}/ssl/privkey.pem
+      -out {{ zabbix_stack_dir }}/ssl/fullchain.pem
+      -days {{ zabbix_ssl_cert_days }}
+      -subj /CN={{ ansible_host }}
+      -addext subjectAltName=IP:{{ ansible_host }}
+  args:
+    creates: "{{ zabbix_stack_dir }}/ssl/fullchain.pem"
+
+- name: Set permissions on private key
+  ansible.builtin.file:
+    path: "{{ zabbix_stack_dir }}/ssl/privkey.pem"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Set permissions on certificate
+  ansible.builtin.file:
+    path: "{{ zabbix_stack_dir }}/ssl/fullchain.pem"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render docker compose file
+  ansible.builtin.template:
+    src: docker-compose.zabbix.yml.j2
+    dest: "{{ zabbix_stack_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart zabbix stack
+
+- name: Render nginx config
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ zabbix_stack_dir }}/nginx/nginx.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart zabbix stack
+
+- name: Start Zabbix stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ zabbix_stack_dir }}"
+    state: present
+    pull: always

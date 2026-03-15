@@ -1,0 +1,87 @@
+services:
+  postgres-server:
+    image: postgres:16-alpine
+    container_name: zabbix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "{{ zabbix_db_name }}"
+      POSTGRES_USER: "{{ zabbix_db_user }}"
+      POSTGRES_PASSWORD: "{{ zabbix_db_password }}"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ zabbix_db_user }} -d {{ zabbix_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - zabbix-net
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:{{ zabbix_version }}
+    container_name: zabbix-server
+    restart: unless-stopped
+    depends_on:
+      postgres-server:
+        condition: service_healthy
+    environment:
+      DB_SERVER_HOST: postgres-server
+      POSTGRES_DB: "{{ zabbix_db_name }}"
+      POSTGRES_USER: "{{ zabbix_db_user }}"
+      POSTGRES_PASSWORD: "{{ zabbix_db_password }}"
+      ZBX_STARTPOLLERS: "{{ zabbix_startpollers }}"
+      ZBX_TIMEOUT: "{{ zabbix_timeout }}"
+      ZBX_CACHESIZE: "{{ zabbix_cachesize }}"
+      ZBX_HISTORYCACHESIZE: "{{ zabbix_historycachesize }}"
+      ZBX_HISTORYINDEXCACHESIZE: "{{ zabbix_historyindexcachesize }}"
+      ZBX_TRENDCACHESIZE: "{{ zabbix_trendcachesize }}"
+      ZBX_VALUECACHESIZE: "{{ zabbix_valuecachesize }}"
+    ports:
+      - "10051:10051"
+    networks:
+      - zabbix-net
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:{{ zabbix_version }}
+    container_name: zabbix-web
+    restart: unless-stopped
+    depends_on:
+      postgres-server:
+        condition: service_healthy
+      zabbix-server:
+        condition: service_started
+    environment:
+      DB_SERVER_HOST: postgres-server
+      POSTGRES_DB: "{{ zabbix_db_name }}"
+      POSTGRES_USER: "{{ zabbix_db_user }}"
+      POSTGRES_PASSWORD: "{{ zabbix_db_password }}"
+      ZBX_SERVER_HOST: zabbix-server
+      PHP_TZ: "{{ zabbix_php_timezone }}"
+    expose:
+      - "8080"
+    networks:
+      - zabbix-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: zabbix-nginx
+    restart: unless-stopped
+    depends_on:
+      - zabbix-web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl/fullchain.pem:/etc/nginx/ssl/fullchain.pem:ro
+      - ./ssl/privkey.pem:/etc/nginx/ssl/privkey.pem:ro
+    networks:
+      - zabbix-net
+
+volumes:
+  postgres_data:
+
+networks:
+  zabbix-net:
+    driver: bridge

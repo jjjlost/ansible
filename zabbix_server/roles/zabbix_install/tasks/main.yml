@@ -1,0 +1,11 @@
+---
+- name: Run apt preparation tasks
+  ansible.builtin.import_tasks: apt.yml
+
+- name: Install Docker and dependencies
+  ansible.builtin.import_tasks: docker.yml
+
+- name: Deploy Zabbix container stack
+  ansible.builtin.import_tasks: zabbix_container.yml
+  tags:
+    - zabbix
